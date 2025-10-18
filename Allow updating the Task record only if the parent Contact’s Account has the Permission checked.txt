@@ -1,0 +1,56 @@
+ public static void handleActivitiesBeforeUpdate(List<Task> taskRecords){
+    List<Id> contactIdList = new List<Id>();
+    Map<Id, Id> taskVsConMap = new Map<Id, Id>();
+    Map<Id, Id> conVsAccMap = new Map<Id, Id>();
+
+    // Step 1: Collect Contact Ids
+    for(Task eachTask : taskRecords){
+        if(eachTask.WhoId != null && String.valueOf(eachTask.WhoId).startsWith('003')){
+            contactIdList.add(eachTask.WhoId);
+            taskVsConMap.put(eachTask.Id, eachTask.WhoId);
+        }
+    }
+
+    // Prevent unnecessary SOQL if no contacts
+    if(contactIdList.isEmpty()){
+        return;
+    }
+
+    // Step 2: Get Contact → Account mapping
+    List<Contact> conRecords = [
+        SELECT Id, AccountId 
+        FROM Contact 
+        WHERE Id IN :contactIdList
+    ];
+    for(Contact con : conRecords){
+        if(con.AccountId != null){
+            conVsAccMap.put(con.Id, con.AccountId);
+        }
+    }
+
+    //  Prevent SOQL if no related Accounts
+    if(conVsAccMap.isEmpty()){
+        return;
+    }
+
+    // Step 3: Get Account permission data
+    Set<Id> accIds = new Set<Id>(conVsAccMap.values());
+    Map<Id, Account> accountRecords = new Map<Id, Account>(
+        [SELECT Id, Modify_Task_Permission__c 
+         FROM Account 
+         WHERE Id IN :accIds]
+    );
+
+    // Step 4: Restrict update if permission is false
+    for(Task eachTask : taskRecords){
+        Id conId = taskVsConMap.get(eachTask.Id);
+        Id accId = conVsAccMap.get(conId);
+
+        if(accId != null && accountRecords.containsKey(accId)){
+            Account acc = accountRecords.get(accId);
+            if(acc.Modify_Task_Permission__c == false){
+                eachTask.addError('You cannot update this task!');
+            }
+        }
+    }
+}
