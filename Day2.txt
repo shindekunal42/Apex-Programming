@@ -1,0 +1,49 @@
+Scnerio :-  Check the Max Contacts Allowed field on the Account record and if the number of child contacts go beyond this number, do not allow Contact insertion & association to this account
+
+// Initialize a list to store Account Ids related to the Contacts being inserted/updated
+List<Id> accountIds = new List<Id>();
+
+// Create a map to store Contact Ids mapped to their corresponding Account Ids
+Map<Id, Id> conIdVsAccMap = new Map<Id, Id>();
+
+// Loop through all new Contact records (trigger.new)
+for (Contact con : newRecords) {
+    accountIds.add(con.AccountId);         // Collect Account Ids for later query
+    conIdVsAccMap.put(con.Id, con.AccountId); // Map Contact Id to its Account Id
+}
+
+// Query all Accounts related to the Contacts being processed
+// Also fetch child Contacts to count how many exist under each Account
+Map<Id, Account> accountRecordMap = new Map<Id, Account>(
+    [SELECT Id,
+            Max_Contact_Allowed__c,   // Custom field that defines the contact limit
+            BillingStreet,
+            BillingCity,
+            BillingState,
+            BillingCountry,
+            BillingPostalCode,
+            (SELECT Id FROM Contacts) // Fetch related Contacts
+     FROM Account
+     WHERE Id IN :accountIds]
+);
+
+// Iterate through all queried Accounts
+for (Id accId : accountRecordMap.keySet()) {
+
+    // Count how many Contacts are already associated with this Account
+    Integer numberContactsPerAccount = (accountRecordMap.get(accId).Contacts).size();
+
+    // Check if the Account has reached or exceeded its contact limit
+    if (accountRecordMap.get(accId).Max_Contact_Allowed__c >= numberContactsPerAccount) {
+
+        System.debug('Error: Contact creation limit reached for Account Id: ' + accId);
+
+        // Loop again through new Contact records to find the ones related to this Account
+        for (Contact con : newRecords) {
+            if (con.AccountId == accId) {
+                // Prevent this Contact from being inserted by showing a validation error
+                con.addError('This Contact creation is not allowed — maximum number of Contacts reached for this Account.');
+            }
+        }
+    }
+}
